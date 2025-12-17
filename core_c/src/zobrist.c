@@ -1,4 +1,4 @@
-#include "contrast_c/zobrist.h"
+#include "./include/contrast_c/zobrist.h"
 #include <stdlib.h>
 
 static uint64_t g_zobrist_hash = 0;

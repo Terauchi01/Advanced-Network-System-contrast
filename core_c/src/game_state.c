@@ -1,4 +1,4 @@
-#include "contrast_c/game_state.h"
+#include "./include/contrast_c/game_state.h"
 #include <string.h>
 
 void game_state_reset(GameState* state) {

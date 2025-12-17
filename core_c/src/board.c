@@ -1,4 +1,4 @@
-#include "contrast_c/board.h"
+#include "./include/contrast_c/board.h"
 #include <string.h>
 
 void board_reset(Board* board) {

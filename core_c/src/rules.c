@@ -1,4 +1,4 @@
-#include "contrast_c/rules.h"
+#include "./include/contrast_c/rules.h"
 #include <string.h>
 
 /* 方向ベクトル */
