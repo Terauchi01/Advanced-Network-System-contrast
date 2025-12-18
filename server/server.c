@@ -185,8 +185,7 @@ void handle_new_connection(int listen_fd, fd_set *read_fds, int *max_fd)
                 FD_SET(new_fd, read_fds);
                 if (new_fd > *max_fd)
                     *max_fd = new_fd;
-                // プロトコル説明: MOVE sx sy dx dy place_tile(0/1) tx ty tile_type(1=Black,2=Gray)
-                send_msg(new_fd, "Welcome! Cmds: SAY <msg>, CREATE <id>, JOIN <id>, MOVE <coords...>\n");
+                send_msg(new_fd, "Welcome! Cmds: SAY <msg>, LIST, CREATE <id>, JOIN <id>, EXIT\n");
                 added = 1;
                 break;
             }
@@ -213,6 +212,27 @@ void process_lobby_command(int client_idx, char *buffer)
         char *msg_ptr = strstr(buffer, " ");
         if (msg_ptr)
             broadcast_lobby(client_idx, msg_ptr + 1);
+    }
+    else if (strcmp(cmd, "LIST") == 0)
+    {
+        char room_list[BUF_SIZE * 2];
+        strcpy(room_list, "=== Available Rooms ===\n");
+        int found = 0;
+        for (int j = 0; j < MAX_CLIENTS; j++)
+        {
+            if (clients[j].state == STATE_WAITING && clients[j].room_id != -1)
+            {
+                char temp[64];
+                sprintf(temp, "Room %d (Waiting for opponent)\n", clients[j].room_id);
+                strcat(room_list, temp);
+                found = 1;
+            }
+        }
+        if (!found)
+        {
+            strcat(room_list, "No rooms available. Create one with CREATE <id>\n");
+        }
+        send_msg(clients[client_idx].fd, room_list);
     }
     else if (strcmp(cmd, "CREATE") == 0)
     {
@@ -289,6 +309,13 @@ void process_lobby_command(int client_idx, char *buffer)
                 send_msg(clients[client_idx].fd, "Error: Room not found.\n");
             }
         }
+    }
+    else if (strcmp(cmd, "EXIT") == 0)
+    {
+        send_msg(clients[client_idx].fd, "Goodbye!\n");
+        // クライアント切断処理は handle_disconnect で行われる
+        close(clients[client_idx].fd);
+        clients[client_idx].fd = -1;
     }
     else
     {

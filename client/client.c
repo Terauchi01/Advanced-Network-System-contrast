@@ -277,7 +277,7 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
-    printf("Connected. Commands: CREATE <id>, JOIN <id>\n");
+    printf("Connected. Commands: LIST, CREATE <id>, JOIN <id>, EXIT\n");
     game_state_reset(&local_state);
 
     while (1)
@@ -343,6 +343,16 @@ int main(int argc, char *argv[])
             if (read(0, buffer, BUF_SIZE - 1) > 0)
             {
                 buffer[strcspn(buffer, "\n")] = 0;
+
+                // EXITコマンドのチェック
+                if (strcmp(buffer, "EXIT") == 0 || strcmp(buffer, "exit") == 0)
+                {
+                    char exit_msg[] = "EXIT\n";
+                    write(sock_fd, exit_msg, strlen(exit_msg));
+                    printf("Exiting...\n");
+                    close(sock_fd);
+                    exit(0);
+                }
 
                 int moved = 0;
                 if (my_player_color != 0 && game_state_current_player(&local_state) == my_player_color)
