@@ -13,9 +13,15 @@ INCLUDES = -I$(CORE_DIR)/include -I$(CORE_DIR)/src/include
 # ライブラリパスとリンク設定
 LIBS = -L$(CORE_DIR) -lcontrast_c
 
-# ターゲット
+# 生成ターゲット
 TARGET_SERVER = $(SERVER_DIR)/server
 TARGET_CLIENT = $(CLIENT_DIR)/client
+
+# サーバーのソースファイル群
+SERVER_SRCS = $(SERVER_DIR)/main.c \
+              $(SERVER_DIR)/network.c \
+              $(SERVER_DIR)/room.c \
+              $(SERVER_DIR)/command.c
 
 .PHONY: all clean core_c_build
 
@@ -25,9 +31,9 @@ all: core_c_build $(TARGET_SERVER) $(TARGET_CLIENT)
 core_c_build:
 	$(MAKE) -C $(CORE_DIR)
 
-# サーバーのビルド
-$(TARGET_SERVER): $(SERVER_DIR)/server.c
-	$(CC) $(CFLAGS) $< -o $@ $(INCLUDES) $(LIBS)
+# サーバーのビルド (分割ファイルをコンパイル)
+$(TARGET_SERVER): $(SERVER_SRCS) $(SERVER_DIR)/server.h
+	$(CC) $(CFLAGS) $(SERVER_SRCS) -o $@ $(INCLUDES) $(LIBS)
 
 # クライアントのビルド
 $(TARGET_CLIENT): $(CLIENT_DIR)/client.c

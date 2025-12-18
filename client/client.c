@@ -15,39 +15,17 @@
 #include "contrast_c/types.h"
 
 #define PORT 10000
-#define BUF_SIZE 256
+#define BUF_SIZE 1024
 
 int sock_fd = -1;
 GameState local_state;
 int my_player_color = 0; // 0=Unknown, 1=Black, 2=White
-
-/* 座標変換: "a1" -> x=0, y=0. 成功時1, 失敗時0 */
-int parse_coord(const char *str, int *x, int *y)
-{
-    if (strlen(str) < 2)
-        return 0;
-    char col = tolower(str[0]);
-    char row = str[1];
-
-    if (col >= 'a' && col <= 'e')
-        *x = col - 'a';
-    else
-        return 0;
-
-    if (row >= '1' && row <= '5')
-        *y = row - '1';
-    else
-        return 0;
-
-    return 1;
-}
 
 /* 内部座標を文字列に変換: (0,0) -> "a1" */
 void format_coord(int x, int y, char *buf)
 {
     if (x >= 0 && x < 5 && y >= 0 && y < 5)
     {
-        /* 修正: '1'+y だと文字コードになるため、y+1 を数値として渡す */
         sprintf(buf, "%c%d", 'a' + x, y + 1);
     }
     else
@@ -142,86 +120,11 @@ void print_legal_moves(const MoveList *moves)
     printf("(Optionally add tile: e.g. '... a1b')\n");
 }
 
-/* ユーザー入力を解析して Move を探す */
-int parse_input_and_send(char *input, const MoveList *legal_moves)
-{
-    char src_str[10] = {0}, dst_str[10] = {0}, tile_part[10] = {0};
-    int sx, sy, dx, dy;
-    int place_tile = 0, tx = -1, ty = -1;
-    TileType tile_type = TILE_NONE;
-
-    for (int i = 0; input[i]; i++)
-    {
-        if (input[i] == ',')
-            input[i] = ' ';
-    }
-
-    int count = sscanf(input, "%s %s %s", src_str, dst_str, tile_part);
-    if (count < 2)
-        return 0;
-
-    if (!parse_coord(src_str, &sx, &sy) || !parse_coord(dst_str, &dx, &dy))
-    {
-        return 0;
-    }
-
-    if (count >= 3 && strlen(tile_part) >= 3)
-    {
-        char t_coord[3] = {tile_part[0], tile_part[1], '\0'};
-        char t_col = tolower(tile_part[2]);
-
-        if (!parse_coord(t_coord, &tx, &ty))
-            return 0;
-
-        if (t_col == 'b')
-            tile_type = TILE_BLACK;
-        else if (t_col == 'g')
-            tile_type = TILE_GRAY;
-        else
-            return 0;
-
-        place_tile = 1;
-    }
-
-    for (size_t i = 0; i < legal_moves->size; i++)
-    {
-        const Move *m = &legal_moves->moves[i];
-        if (m->sx == sx && m->sy == sy && m->dx == dx && m->dy == dy)
-        {
-            if (m->place_tile == place_tile)
-            {
-                if (!place_tile)
-                {
-                    char buf[BUF_SIZE];
-                    sprintf(buf, "MOVE %d %d %d %d 0 -1 -1 0\n", sx, sy, dx, dy);
-                    write(sock_fd, buf, strlen(buf));
-
-                    game_state_apply_move(&local_state, m);
-                    print_board();
-                    return 1;
-                }
-                else
-                {
-                    if (m->tx == tx && m->ty == ty && m->tile == tile_type)
-                    {
-                        char buf[BUF_SIZE];
-                        sprintf(buf, "MOVE %d %d %d %d 1 %d %d %d\n",
-                                sx, sy, dx, dy, tx, ty, (int)tile_type);
-                        write(sock_fd, buf, strlen(buf));
-
-                        game_state_apply_move(&local_state, m);
-                        print_board();
-                        return 1;
-                    }
-                }
-            }
-        }
-    }
-    return 0;
-}
-
 void prompt_move()
 {
+    if (my_player_color == 0)
+        return;
+
     if (game_state_current_player(&local_state) != my_player_color)
     {
         printf("Waiting for opponent...\n");
@@ -234,8 +137,77 @@ void prompt_move()
 
     if (moves.size > 0)
     {
-        printf("Enter move (e.g. 'c5,c4'): ");
+        printf("Enter move (e.g. 'a1,a2' or 'a1,a2 b1g'): ");
         fflush(stdout);
+    }
+}
+
+/* サーバーからの1行分のメッセージを処理する関数 */
+void process_server_line(char *line)
+{
+    int sx, sy, dx, dy, place, tx, ty, tile;
+
+    // 相手の手 (OPPONENT_MOVE) または 自分の受理された手 (YOUR_MOVE)
+    if (strncmp(line, "OPPONENT_MOVE", 13) == 0 || strncmp(line, "YOUR_MOVE", 9) == 0)
+    {
+        char *params = strstr(line, " ");
+        if (params)
+        {
+            sscanf(params, "%d %d %d %d %d %d %d %d",
+                   &sx, &sy, &dx, &dy, &place, &tx, &ty, &tile);
+            Move m = {sx, sy, dx, dy, place, tx, ty, (TileType)tile};
+            game_state_apply_move(&local_state, &m);
+
+            if (strncmp(line, "OPPONENT_MOVE", 13) == 0)
+            {
+                printf("\nOpponent moved.\n");
+            }
+            else
+            {
+                printf("\nMove accepted.\n");
+            }
+            print_board();
+            prompt_move();
+        }
+    }
+    else if (strstr(line, "You are BLACK"))
+    {
+        printf("%s\n", line);
+        my_player_color = PLAYER_BLACK;
+        game_state_reset(&local_state);
+        print_board();
+        prompt_move();
+    }
+    else if (strstr(line, "You are WHITE"))
+    {
+        printf("%s\n", line);
+        my_player_color = PLAYER_WHITE;
+        game_state_reset(&local_state);
+        print_board();
+        printf("Waiting for opponent...\n");
+    }
+    // 勝利判定の修正: "WIN" または "You Win!" (相手切断時) を検知
+    else if (strncmp(line, "WIN", 3) == 0 || strstr(line, "You Win!"))
+    {
+        printf("\n%s\n", line); // 受信メッセージを表示 ("Opponent disconnected. You Win!")
+        printf("!!! YOU WIN !!!\n");
+        my_player_color = 0; // ゲーム終了状態へリセット
+        printf("Returned to Lobby. (LIST, CREATE, JOIN, EXIT)\n");
+    }
+    else if (strncmp(line, "LOSE", 4) == 0)
+    {
+        printf("\n... You Lose ...\n");
+        my_player_color = 0; // ゲーム終了状態へリセット
+        printf("Returned to Lobby. (LIST, CREATE, JOIN, EXIT)\n");
+    }
+    else
+    {
+        // その他のメッセージ
+        printf("%s\n", line);
+        if (strncmp(line, "Error:", 6) == 0)
+        {
+            prompt_move();
+        }
     }
 }
 
@@ -292,6 +264,7 @@ int main(int argc, char *argv[])
             break;
         }
 
+        /* サーバーからの受信 */
         if (FD_ISSET(sock_fd, &read_fds))
         {
             memset(buffer, 0, BUF_SIZE);
@@ -299,44 +272,16 @@ int main(int argc, char *argv[])
             if (n <= 0)
                 break;
 
-            if (strncmp(buffer, "OPPONENT_MOVE", 13) == 0)
+            buffer[n] = '\0';
+            char *line = strtok(buffer, "\n");
+            while (line != NULL)
             {
-                int sx, sy, dx, dy, place, tx, ty, tile;
-                sscanf(buffer, "OPPONENT_MOVE %d %d %d %d %d %d %d %d",
-                       &sx, &sy, &dx, &dy, &place, &tx, &ty, &tile);
-                Move m = {sx, sy, dx, dy, place, tx, ty, (TileType)tile};
-                game_state_apply_move(&local_state, &m);
-                printf("\nOpponent moved.\n");
-                print_board();
-                prompt_move();
-            }
-            else if (strstr(buffer, "You are BLACK"))
-            {
-                printf("%s", buffer);
-                my_player_color = PLAYER_BLACK;
-                game_state_reset(&local_state);
-                print_board();
-                prompt_move();
-            }
-            else if (strstr(buffer, "You are WHITE"))
-            {
-                printf("%s", buffer);
-                my_player_color = PLAYER_WHITE;
-                game_state_reset(&local_state);
-                print_board();
-                printf("Waiting for opponent...\n");
-            }
-            else if (strncmp(buffer, "WIN", 3) == 0 || strncmp(buffer, "LOSE", 4) == 0)
-            {
-                printf("\n%s\n", buffer);
-                my_player_color = 0;
-            }
-            else if (strncmp(buffer, "OK", 2) != 0)
-            {
-                printf("%s", buffer);
+                process_server_line(line);
+                line = strtok(NULL, "\n");
             }
         }
 
+        /* キーボード入力 */
         if (FD_ISSET(0, &read_fds))
         {
             memset(buffer, 0, BUF_SIZE);
@@ -344,39 +289,26 @@ int main(int argc, char *argv[])
             {
                 buffer[strcspn(buffer, "\n")] = 0;
 
-                // EXITコマンドのチェック
-                if (strcmp(buffer, "EXIT") == 0 || strcmp(buffer, "exit") == 0)
+                // EXITコマンド
+                if (strncmp(buffer, "EXIT", 4) == 0)
                 {
-                    char exit_msg[] = "EXIT\n";
-                    write(sock_fd, exit_msg, strlen(exit_msg));
                     printf("Exiting...\n");
                     close(sock_fd);
                     exit(0);
                 }
 
-                int moved = 0;
+                // ゲーム中かつ自分の手番ならMOVEコマンドとして送信
                 if (my_player_color != 0 && game_state_current_player(&local_state) == my_player_color)
                 {
-                    MoveList moves;
-                    rules_legal_moves(&local_state, &moves);
-                    if (parse_input_and_send(buffer, &moves))
-                    {
-                        moved = 1;
-                    }
+                    char send_buf[BUF_SIZE];
+                    sprintf(send_buf, "MOVE %s\n", buffer);
+                    write(sock_fd, send_buf, strlen(send_buf));
                 }
-
-                if (!moved)
+                else
                 {
-                    if (my_player_color != 0 && game_state_current_player(&local_state) == my_player_color)
-                    {
-                        printf("Invalid format or move.\n");
-                        prompt_move();
-                    }
-                    else
-                    {
-                        strcat(buffer, "\n");
-                        write(sock_fd, buffer, strlen(buffer));
-                    }
+                    // それ以外（ロビー）はそのまま送信
+                    strcat(buffer, "\n");
+                    write(sock_fd, buffer, strlen(buffer));
                 }
             }
         }
